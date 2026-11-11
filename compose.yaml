@@ -1,0 +1,19 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: knowflow
+      POSTGRES_PASSWORD: knowflow
+      POSTGRES_DB: knowflow
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowflow -d knowflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+volumes:
+  postgres-data:
