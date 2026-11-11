@@ -16,29 +16,29 @@ def connect():
     return psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
 
 
-def find_document(digest: str):
+def find_document(digest: str, embedding_model: str):
     with connect() as connection:
         return connection.execute(
-            "SELECT id FROM documents WHERE workspace_id = %s AND sha256 = %s",
-            (WORKSPACE_ID, digest),
+            "SELECT id FROM documents WHERE workspace_id = %s AND sha256 = %s AND embedding_model = %s",
+            (WORKSPACE_ID, digest, embedding_model),
         ).fetchone()
 
 
-def save_document(title: str, digest: str, passages, embeddings) -> tuple[int, bool]:
+def save_document(title: str, digest: str, embedding_model: str, passages, embeddings) -> tuple[int, bool]:
     with connect() as connection:
         row = connection.execute(
             """
-            INSERT INTO documents (workspace_id, title, sha256)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (workspace_id, sha256) DO NOTHING
+            INSERT INTO documents (workspace_id, title, sha256, embedding_model)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (workspace_id, sha256, embedding_model) DO NOTHING
             RETURNING id
             """,
-            (WORKSPACE_ID, title, digest),
+            (WORKSPACE_ID, title, digest, embedding_model),
         ).fetchone()
         if row is None:
             existing = connection.execute(
-                "SELECT id FROM documents WHERE workspace_id = %s AND sha256 = %s",
-                (WORKSPACE_ID, digest),
+                "SELECT id FROM documents WHERE workspace_id = %s AND sha256 = %s AND embedding_model = %s",
+                (WORKSPACE_ID, digest, embedding_model),
             ).fetchone()
             return existing["id"], False
 
@@ -56,7 +56,7 @@ def save_document(title: str, digest: str, passages, embeddings) -> tuple[int, b
         return row["id"], True
 
 
-def search(embedding: list[float], limit: int):
+def search(embedding: list[float], embedding_model: str, limit: int):
     with connect() as connection:
         return connection.execute(
             """
@@ -64,9 +64,9 @@ def search(embedding: list[float], limit: int):
                    c.page_number, c.text,
                    c.embedding <=> %s::vector AS distance
             FROM chunks c JOIN documents d ON d.id = c.document_id
-            WHERE d.workspace_id = %s
+            WHERE d.workspace_id = %s AND d.embedding_model = %s
             ORDER BY distance, c.id
             LIMIT %s
             """,
-            (str(embedding), WORKSPACE_ID, limit),
+            (str(embedding), WORKSPACE_ID, embedding_model, limit),
         ).fetchall()

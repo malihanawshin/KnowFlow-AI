@@ -13,13 +13,19 @@ python -m pip install -r backend/requirements.txt
 docker compose up -d --wait db
 ```
 
-Set `OPENAI_API_KEY` in your shell, then start the API:
+Add `OPENROUTER_API_KEY` to the ignored `backend/.env` file, then start the API:
 
 ```bash
-uvicorn backend.main:app --reload
+uvicorn backend.main:app --reload --env-file backend/.env
 ```
 
-The database defaults to port 5433. Set `DATABASE_URL` to use a different database and apply `backend/schema.sql` there. Compose applies the schema when it creates the database volume. OpenAI provides embeddings via `text-embedding-3-small` and generates answers with `gpt-4.1-mini` by default. Set `OPENAI_ANSWER_MODEL` to choose another model that supports Chat Completions JSON mode.
+The database defaults to port 5433. Set `DATABASE_URL` to use a different database and apply `backend/schema.sql` there. Compose applies the schema when it creates the database volume. OpenRouter defaults to the free `liquid/lfm-2.5-embedding-350m:free` embedding model and `openrouter/free` for answers. Set `OPENROUTER_EMBEDDING_MODEL` or `OPENROUTER_ANSWER_MODEL` to override them. The answer model must support Chat Completions JSON mode. Re-upload documents after changing embedding models so search uses the matching vectors. To use OpenAI directly, set `OPENAI_API_KEY` and optionally `OPENAI_ANSWER_MODEL`. OpenRouter takes precedence when both keys are set.
+
+If you already created the database with the original fixed-dimension schema, apply the migration before starting the API:
+
+```bash
+docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/migrate_embedding_models.sql
+```
 
 ## Try the handbook
 
@@ -47,4 +53,4 @@ Expect the parental leave answer to cite page 2 and the equipment question to re
 python backend/parse_pdf.py fixtures/employee-handbook.pdf
 ```
 
-This demo uses one local workspace. Upload sends extracted text to OpenAI for embeddings, and asking a question sends the question and retrieved passages for answer generation. Use the fictional fixture for testing.
+This demo uses one local workspace. Upload sends extracted text to your configured model provider for embeddings, and asking a question sends the question and retrieved passages for answer generation. Use the fictional fixture for testing.
