@@ -95,3 +95,19 @@ blockquote { margin-top: 9px; color: var(--muted); font-size: 13px; line-height:
   .heading { margin-bottom: 21px; }
   .empty { padding: 28px 15px; }
 }
+.topbar { justify-content: space-between; gap: 12px; }
+.account { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; color: var(--muted); }
+.account > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.secondary { padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--accent); white-space: nowrap; }
+.secondary:hover:not(:disabled) { background: var(--accent-light); }
+.signin { max-width: 452px; margin: 65px auto; padding: 0 16px; }
+.signin-form { display: grid; gap: 10px; padding: clamp(20px, 5vw, 32px); }
+.signin h1 { font: 400 46px/1 "Instrument Serif", Georgia, serif; }
+.signin p { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.signin label { margin-top: 8px; font-size: 13px; font-weight: 650; }
+.signin input { min-width: 0; padding: 10px 12px; border: 1px solid #cbd8ce; border-radius: 8px; }
+.signin .primary { min-height: 42px; margin-top: 9px; }
+.signin .error, .session-error { color: #9c3027; }
+.session-error { max-width: 1160px; margin: 16px auto 0; padding: 0 16px; }
+.account-switch { margin-top: 5px; text-align: center; }
+.account-switch button { padding: 2px 4px; border: 0; background: transparent; color: var(--accent); font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }

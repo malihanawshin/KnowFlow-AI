@@ -8,15 +8,19 @@ from pathlib import Path
 import psycopg
 import pymupdf
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from openai import APIError, APIStatusError, OpenAI
 from pydantic import BaseModel, Field, field_validator
 
-from . import db
+from . import auth, db
+from .auth import ActiveMember
 from .chunk_text import chunk_text
 from .parse_pdf import extract_pages
 
 app = FastAPI(title="KnowFlow AI")
+app.include_router(auth.router)
 MAX_PDF_BYTES = 10 * 1024 * 1024
 EMBEDDING_MODEL = "text-embedding-3-small"
 OPENROUTER_EMBEDDING_MODEL = "liquid/lfm-2.5-embedding-350m:free"
@@ -41,9 +45,33 @@ class GeneratedAnswer(BaseModel):
     citation_ids: list[int]
 
 
+@app.middleware("http")
+async def protect_browser_requests(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if request.method == "POST" and (
+        request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}
+        or (origin and origin != str(request.base_url).rstrip("/"))
+    ):
+        return JSONResponse(status_code=403, content={"detail": "Cross-origin request rejected."})
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.exception_handler(psycopg.Error)
 async def database_error(request: Request, error: psycopg.Error):
     return JSONResponse(status_code=503, content={"detail": "Database unavailable or uninitialized."})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, error: RequestValidationError):
+    if request.url.path in {"/login", "/signup"}:
+        message = (
+            "Enter a valid email and a password between 12 and 256 characters."
+            if request.url.path == "/signup" else "Enter your email and password."
+        )
+        return JSONResponse(status_code=422, content={"detail": message})
+    return await request_validation_exception_handler(request, error)
 
 
 @app.exception_handler(APIError)
@@ -88,7 +116,7 @@ def answer_model() -> str:
 
 
 @app.post("/documents", status_code=201)
-def upload_document(file: UploadFile, response: Response):
+def upload_document(file: UploadFile, response: Response, member: ActiveMember):
     pdf_bytes = file.file.read(MAX_PDF_BYTES + 1)
     if len(pdf_bytes) > MAX_PDF_BYTES:
         raise HTTPException(413, "PDF exceeds the 10 MiB upload limit.")
@@ -103,7 +131,7 @@ def upload_document(file: UploadFile, response: Response):
 
     digest = hashlib.sha256(pdf_bytes).hexdigest()
     model = embedding_model()
-    existing = db.find_document(digest, model)
+    existing = db.find_document(member.workspace_id, digest, model)
     if existing:
         response.status_code = 200
         return {"document_id": existing["id"], "created": False}
@@ -111,26 +139,26 @@ def upload_document(file: UploadFile, response: Response):
     with openai_client() as client:
         embeddings = embed(client, model, [text for _, text in passages])
     title = Path(file.filename or "document.pdf").name
-    document_id, created = db.save_document(title, digest, model, passages, embeddings)
+    document_id, created = db.save_document(member.workspace_id, title, digest, model, passages, embeddings)
     if not created:
         response.status_code = 200
     return {"document_id": document_id, "created": created}
 
 
 @app.post("/search")
-def search(query: Query):
+def search(query: Query, member: ActiveMember):
     model = embedding_model()
     with openai_client() as client:
         embedding = embed(client, model, [query.question])[0]
-    return {"passages": db.search(embedding, model, query.limit)}
+    return {"passages": db.search(member.workspace_id, embedding, model, query.limit)}
 
 
 @app.post("/ask")
-def ask(query: Query):
+def ask(query: Query, member: ActiveMember):
     model = embedding_model()
     with openai_client() as client:
         embedding = embed(client, model, [query.question])[0]
-        passages = db.search(embedding, model, query.limit)
+        passages = db.search(member.workspace_id, embedding, model, query.limit)
         if not passages:
             return {"answer": INSUFFICIENT_EVIDENCE, "citations": []}
         completion = client.chat.completions.create(

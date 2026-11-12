@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from getpass import getpass
 import json
 from pathlib import Path
 import re
@@ -61,13 +62,17 @@ def evaluate(client, case, document_id):
 def describe_error(error: Exception) -> str:
     if isinstance(error, httpx.HTTPStatusError):
         response = error.response
-        return f"{response.request.url.path} returned HTTP {response.status_code}: {response.text}"
+        path = response.request.url.path
+        status = f"{path} returned HTTP {response.status_code}"
+        return status if path == "/login" else f"{status}: {response.text}"
     return str(error)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="FastAPI URL")
+    parser.add_argument("--email", required=True, help="Evaluation workspace account")
+    parser.add_argument("--other-email", help="Account in a separate, empty workspace for the isolation check")
     args = parser.parse_args()
     cases = json.loads(CASES.read_text(encoding="utf-8"))
     passed = Counter()
@@ -76,6 +81,7 @@ def main() -> int:
 
     with httpx.Client(base_url=args.base_url, timeout=120, trust_env=False) as client:
         try:
+            member = post(client, "/login", json={"email": args.email, "password": getpass(f"Password for {args.email}: ")})
             with FIXTURE.open("rb") as pdf:
                 upload = post(client, "/documents", files={"file": (FIXTURE.name, pdf, "application/pdf")})
             document_id = upload["document_id"]
@@ -99,13 +105,32 @@ def main() -> int:
                 print(f"  Answer: {answer}")
                 print(f"  Cited pages: {[(item['title'], item['page_number']) for item in citations]}")
 
+    isolation_failed = False
+    if args.other_email:
+        with httpx.Client(base_url=args.base_url, timeout=120, trust_env=False) as other:
+            try:
+                second = post(other, "/login", json={
+                    "email": args.other_email,
+                    "password": getpass(f"Password for {args.other_email}: "),
+                })
+                if member["workspace_id"] == second["workspace_id"]:
+                    raise ValueError("Use an account in a different workspace for the isolation check.")
+                query = {"question": cases[0]["question"], "workspace_id": member["workspace_id"]}
+                passages = post(other, "/search", json=query)["passages"]
+                result = post(other, "/ask", json=query)
+                isolation_failed = bool(passages or result["citations"]) or normalize(result["answer"]) != normalize(ABSTENTION)
+                print(f"{'FAIL' if isolation_failed else 'PASS'} workspace-isolation")
+            except (httpx.HTTPError, ValueError, KeyError) as error:
+                print(f"ERROR workspace-isolation — {describe_error(error)}")
+                return 2
+
     print("\nSummary")
     for metric in ("retrieval@5", "answer", "citation", "abstention"):
         print(f"  {metric}: {passed[metric]}/{completed[metric]} completed checks")
     print(f"  API errors: {errors}/{len(cases)} cases")
     if errors:
         return 2
-    return int(passed != completed)
+    return int(passed != completed or isolation_failed)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,26 @@ If you already created the database with the original fixed-dimension schema, ap
 docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/migrate_embedding_models.sql
 ```
 
+## Create an account
+
+On an existing database volume, apply the additive sign-in schema once before using the updated API. Fresh volumes apply it automatically.
+
+```bash
+docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/schema_auth.sql
+```
+
+Choose **Sign up** in the browser workspace to create an account. KnowFlow creates a private workspace for it and signs you in.
+
+For existing documents uploaded before sign-in, an administrator can still provision an account in the original `local` workspace. From the project root, with the backend environment activated:
+
+```bash
+python -m backend.create_user reader@example.test local
+```
+
+The command prompts for a password without echoing it. Each account belongs to one workspace. A new browser sign-up starts with an empty workspace.
+
+Sign-in uses an eight-hour, revocable HTTP-only cookie. For HTTPS, set `KNOWFLOW_SECURE_COOKIE=1` in `backend/.env`.
+
 ## Open the browser workspace
 
 With the backend running, start the frontend from the project root in a second terminal. Use Node.js 20.9 or newer.
@@ -36,46 +56,28 @@ npm ci --prefix frontend
 npm run dev --prefix frontend
 ```
 
-Open [localhost:3000](http://localhost:3000). Choose `fixtures/employee-handbook.pdf`, select **Upload PDF**, then ask the suggested parental leave question. The answer should cite page 2 and show the supporting passage. The equipment allowance question should return insufficient evidence.
+Open [localhost:3000](http://localhost:3000) and sign up or sign in. Choose `fixtures/employee-handbook.pdf`, select **Upload PDF**, then ask the suggested parental leave question. The answer should cite page 2 and show the supporting passage.
 
-The frontend proxies uploads and questions to FastAPI at `http://127.0.0.1:8000`. If the backend uses a different address, set `KNOWFLOW_API_URL` when starting the frontend. Keep model credentials in `backend/.env`.
+The frontend proxies requests to FastAPI at `http://127.0.0.1:8000`. If the backend uses a different address, set `KNOWFLOW_API_URL` when starting the frontend. Keep model credentials in `backend/.env`.
 
 ## Try the handbook through the API
 
-Use the interactive API docs at [localhost:8000/docs](http://127.0.0.1:8000/docs) or run:
-
-```bash
-curl -f -F 'file=@fixtures/employee-handbook.pdf' http://127.0.0.1:8000/documents
-
-curl -f http://127.0.0.1:8000/search \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"What paid leave do I get after adopting a child?"}'
-
-curl -f http://127.0.0.1:8000/ask \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"How many paid parental leave days do employees receive?"}'
-
-curl -f http://127.0.0.1:8000/ask \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"What is the annual home office equipment allowance?"}'
-```
-
-Expect the parental leave answer to cite page 2 and the equipment question to return insufficient evidence. Re-uploading the same file returns its existing document ID. To inspect PDF extraction independently:
+Use the interactive [FastAPI docs](http://localhost:8000/docs). Send your credentials to `POST /login` to establish the session cookie, then call `/documents`, `/search`, or `/ask` in the same browser. To inspect PDF extraction independently:
 
 ```bash
 python backend/parse_pdf.py fixtures/employee-handbook.pdf
 ```
 
-This demo uses one local workspace. Upload sends extracted text to your configured model provider for embeddings, and asking a question sends the question and retrieved passages for answer generation. Use the fictional fixture for testing.
+Upload sends extracted text to your configured model provider for embeddings. Asking a question sends the question and retrieved passages for answer generation. Use the fictional fixture for testing.
 
 ## Evaluate retrieval and answers
 
 With FastAPI running and the backend environment activated, run:
 
 ```bash
-python evaluation/run.py
+python evaluation/run.py --email reader@example.test
 ```
 
-The runner uploads the fictional handbook if needed, then checks five questions. It reports whether the expected passage appears in the top five search results, whether the answer contains the expected fact, whether a citation contains the expected passage on the correct page, and whether the uncovered equipment allowance question returns insufficient evidence with no citations.
+The runner signs in and uploads the fictional handbook if needed, then checks five questions. It reports whether the expected passage appears in the top five search results, whether the answer contains the expected fact, whether a citation contains the expected passage on the correct page, and whether the uncovered equipment allowance question returns insufficient evidence with no citations.
 
-Use a workspace containing only the handbook for a comparable baseline. These are fixture checks, so the answer patterns cover common phrasings and the citation check matches known evidence. The script exits with status `1` for failed checks and `2` for API or setup errors. Use `--base-url` if FastAPI runs on another port.
+Use a workspace containing only the handbook for a comparable baseline. To also confirm that a second, empty workspace cannot retrieve or cite the handbook, add `--other-email reviewer@example.test`. The runner prompts for each password. It exits with status `1` for failed checks and `2` for API or setup errors. Use `--base-url` if FastAPI runs on another port.

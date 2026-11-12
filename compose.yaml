@@ -10,6 +10,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/schema_auth.sql:/docker-entrypoint-initdb.d/02-auth.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U knowflow -d knowflow"]
       interval: 3s

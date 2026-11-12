@@ -1,12 +1,9 @@
-"""Store documents and retrieve the nearest passages in the local workspace."""
+"""Store documents and retrieve the nearest passages in the authenticated workspace."""
 
 import os
 
 import psycopg
 from psycopg.rows import dict_row
-
-WORKSPACE_ID = "local"
-
 
 def connect():
     url = os.getenv(
@@ -16,15 +13,15 @@ def connect():
     return psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
 
 
-def find_document(digest: str, embedding_model: str):
+def find_document(workspace_id: str, digest: str, embedding_model: str):
     with connect() as connection:
         return connection.execute(
             "SELECT id FROM documents WHERE workspace_id = %s AND sha256 = %s AND embedding_model = %s",
-            (WORKSPACE_ID, digest, embedding_model),
+            (workspace_id, digest, embedding_model),
         ).fetchone()
 
 
-def save_document(title: str, digest: str, embedding_model: str, passages, embeddings) -> tuple[int, bool]:
+def save_document(workspace_id: str, title: str, digest: str, embedding_model: str, passages, embeddings) -> tuple[int, bool]:
     with connect() as connection:
         row = connection.execute(
             """
@@ -33,12 +30,12 @@ def save_document(title: str, digest: str, embedding_model: str, passages, embed
             ON CONFLICT (workspace_id, sha256, embedding_model) DO NOTHING
             RETURNING id
             """,
-            (WORKSPACE_ID, title, digest, embedding_model),
+            (workspace_id, title, digest, embedding_model),
         ).fetchone()
         if row is None:
             existing = connection.execute(
                 "SELECT id FROM documents WHERE workspace_id = %s AND sha256 = %s AND embedding_model = %s",
-                (WORKSPACE_ID, digest, embedding_model),
+                (workspace_id, digest, embedding_model),
             ).fetchone()
             return existing["id"], False
 
@@ -56,7 +53,7 @@ def save_document(title: str, digest: str, embedding_model: str, passages, embed
         return row["id"], True
 
 
-def search(embedding: list[float], embedding_model: str, limit: int):
+def search(workspace_id: str, embedding: list[float], embedding_model: str, limit: int):
     with connect() as connection:
         return connection.execute(
             """
@@ -68,5 +65,5 @@ def search(embedding: list[float], embedding_model: str, limit: int):
             ORDER BY distance, c.id
             LIMIT %s
             """,
-            (str(embedding), WORKSPACE_ID, embedding_model, limit),
+            (str(embedding), workspace_id, embedding_model, limit),
         ).fetchall()
