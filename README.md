@@ -67,3 +67,15 @@ python backend/parse_pdf.py fixtures/employee-handbook.pdf
 ```
 
 This demo uses one local workspace. Upload sends extracted text to your configured model provider for embeddings, and asking a question sends the question and retrieved passages for answer generation. Use the fictional fixture for testing.
+
+## Evaluate retrieval and answers
+
+With FastAPI running and the backend environment activated, run:
+
+```bash
+python evaluation/run.py
+```
+
+The runner uploads the fictional handbook if needed, then checks five questions. It reports whether the expected passage appears in the top five search results, whether the answer contains the expected fact, whether a citation contains the expected passage on the correct page, and whether the uncovered equipment allowance question returns insufficient evidence with no citations.
+
+Use a workspace containing only the handbook for a comparable baseline. These are fixture checks, so the answer patterns cover common phrasings and the citation check matches known evidence. The script exits with status `1` for failed checks and `2` for API or setup errors. Use `--base-url` if FastAPI runs on another port.

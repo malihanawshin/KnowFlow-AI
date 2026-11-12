@@ -1,0 +1,43 @@
+[
+  {
+    "id": "adoption-leave",
+    "question": "How much paid parental leave do I get after adopting a child?",
+    "expected": {
+      "page": 2,
+      "passage": "20 working days of paid parental leave",
+      "answer_pattern": "\\b(?:20|twenty)\\s+working\\s+days\\b"
+    }
+  },
+  {
+    "id": "full-time-vacation",
+    "question": "What is the annual paid vacation entitlement for full-time staff?",
+    "expected": {
+      "page": 1,
+      "passage": "25 working days of paid vacation per calendar year",
+      "answer_pattern": "\\b(?:25|twenty[ -]five)\\s+working\\s+days\\b"
+    }
+  },
+  {
+    "id": "vacation-carryover",
+    "question": "How many unused vacation days can I carry into the next year?",
+    "expected": {
+      "page": 1,
+      "passage": "carry up to 5 unused vacation days",
+      "answer_pattern": "\\b(?:5|five)\\s+(?:unused\\s+)?(?:vacation\\s+)?days\\b"
+    }
+  },
+  {
+    "id": "parental-leave-deadline",
+    "question": "Within how many months of a birth or adoption must I use all my parental leave?",
+    "expected": {
+      "page": 2,
+      "passage": "within 12 months of the birth or adoption",
+      "answer_pattern": "\\b(?:12|twelve)\\s+months\\b"
+    }
+  },
+  {
+    "id": "equipment-allowance",
+    "question": "What is the annual home office equipment allowance?",
+    "expected": null
+  }
+]
