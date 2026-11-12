@@ -184,9 +184,9 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
   function selectFile(candidate: File | null) {
     setUploadNotice("");
     setUploadError("");
-    if (candidate && (!candidate.name.toLowerCase().endsWith(".pdf") || candidate.size > 10 * 1024 * 1024)) {
+    if (candidate && (!candidate.name.toLowerCase().endsWith(".pdf") || candidate.size > 4_000_000)) {
       setFile(null);
-      setUploadError("Choose a PDF no larger than 10 MiB.");
+      setUploadError("Choose a PDF no larger than 4 MB.");
       return;
     }
     setFile(candidate);
@@ -277,7 +277,7 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
               >
                 <span className="upload-icon"><Upload size={18} /></span>
                 <strong>Choose a PDF</strong>
-                <span>or drop it here · up to 10 MiB</span>
+                <span>or drop it here · up to 4 MB</span>
               </button>
             )}
             {file && <button className="primary upload-button" disabled={uploading} type="submit">

@@ -13,6 +13,19 @@ def connect():
     return psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
 
 
+def has_documents(workspace_id: str, embedding_model: str) -> bool:
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM documents WHERE workspace_id = %s AND embedding_model = %s
+            ) AS has_documents
+            """,
+            (workspace_id, embedding_model),
+        ).fetchone()
+    return row["has_documents"]
+
+
 def find_document(workspace_id: str, digest: str, embedding_model: str):
     with connect() as connection:
         return connection.execute(

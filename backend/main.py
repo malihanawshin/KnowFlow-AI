@@ -21,7 +21,7 @@ from .parse_pdf import extract_pages
 
 app = FastAPI(title="KnowFlow AI")
 app.include_router(auth.router)
-MAX_PDF_BYTES = 10 * 1024 * 1024
+MAX_PDF_BYTES = 4_000_000
 EMBEDDING_MODEL = "text-embedding-3-small"
 OPENROUTER_EMBEDDING_MODEL = "liquid/lfm-2.5-embedding-350m:free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -119,7 +119,7 @@ def answer_model() -> str:
 def upload_document(file: UploadFile, response: Response, member: ActiveMember):
     pdf_bytes = file.file.read(MAX_PDF_BYTES + 1)
     if len(pdf_bytes) > MAX_PDF_BYTES:
-        raise HTTPException(413, "PDF exceeds the 10 MiB upload limit.")
+        raise HTTPException(413, "PDF exceeds the 4 MB upload limit.")
     try:
         pages = extract_pages(pdf_bytes)
     except (ValueError, pymupdf.FileDataError) as error:
@@ -148,6 +148,8 @@ def upload_document(file: UploadFile, response: Response, member: ActiveMember):
 @app.post("/search")
 def search(query: Query, member: ActiveMember):
     model = embedding_model()
+    if not db.has_documents(member.workspace_id, model):
+        return {"passages": []}
     with openai_client() as client:
         embedding = embed(client, model, [query.question])[0]
     return {"passages": db.search(member.workspace_id, embedding, model, query.limit)}
@@ -156,6 +158,8 @@ def search(query: Query, member: ActiveMember):
 @app.post("/ask")
 def ask(query: Query, member: ActiveMember):
     model = embedding_model()
+    if not db.has_documents(member.workspace_id, model):
+        return {"answer": INSUFFICIENT_EVIDENCE, "citations": []}
     with openai_client() as client:
         embedding = embed(client, model, [query.question])[0]
         passages = db.search(member.workspace_id, embedding, model, query.limit)

@@ -1,0 +1,11 @@
+.env
+.env.*
+.envrc
+**/.env
+**/.env.*
+**/.envrc
+.venv/
+**/__pycache__/
+frontend/
+fixtures/
+evaluation/

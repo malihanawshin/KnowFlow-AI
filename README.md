@@ -81,3 +81,26 @@ python evaluation/run.py --email reader@example.test
 The runner signs in and uploads the fictional handbook if needed, then checks five questions. It reports whether the expected passage appears in the top five search results, whether the answer contains the expected fact, whether a citation contains the expected passage on the correct page, and whether the uncovered equipment allowance question returns insufficient evidence with no citations.
 
 Use a workspace containing only the handbook for a comparable baseline. To also confirm that a second, empty workspace cannot retrieve or cite the handbook, add `--other-email reviewer@example.test`. The runner prompts for each password. It exits with status `1` for failed checks and `2` for API or setup errors. Use `--base-url` if FastAPI runs on another port.
+
+## Deploy a Vercel preview
+
+Create two Vercel projects from this repository. Use the repository root for **FastAPI** and `frontend/` for **Next.js**. The FastAPI project uses Python 3.12 and `backend.main:app`. Use the Preview environment for verification. If Vercel requires the first deployment on a new project to be Production, decide whether to initialize that project or use an existing project with Preview deployments. PDFs are limited to 4 MB to leave room for multipart headers within Vercel's 4.5 MB request limit.
+
+1. Create a dedicated Neon Free preview database and run `backend/schema.sql`, then `backend/schema_auth.sql` in its SQL editor. The first script enables pgvector. Use a fresh database for preview data.
+2. In the FastAPI project's **Preview** environment, set `DATABASE_URL` to the Neon connection string and `KNOWFLOW_SECURE_COOKIE=1`. Keep `OPENROUTER_API_KEY` there too when you are ready to test real indexing and answers. Sign-up and the isolation smoke test do not require it.
+3. Deploy the FastAPI preview, then set `KNOWFLOW_API_URL` to its HTTPS URL in the Next.js project's **Preview** environment and deploy the frontend. In the API project's **Deployment Protection → Trusted Sources**, allow the Next.js project's **Preview** environment to call the API's **Preview** environment. The Next.js relay sends a short-lived Vercel OIDC token on that request.
+4. Open the frontend preview and verify **Sign up**, **Sign out**, and **Sign in**. To check database-backed isolation without spending model quota, run the smoke test below with the preview `DATABASE_URL` already in your shell. For a protected preview, run with a short-lived `VERCEL_OIDC_TOKEN` issued to the same project by the authenticated Vercel CLI. Use `--direct-api` when testing the FastAPI deployment directly.
+
+```bash
+python -m evaluation.verify_preview https://your-frontend-preview.vercel.app
+```
+
+The smoke test creates two temporary accounts, seeds one fictional handbook passage with a synthetic vector, and checks that only the owner can look up that PDF. It checks that the second workspace sees no search results or citations, even with the first workspace's ID in its request, and removes its temporary records. If a model key is already configured in the preview, pass `--embedding-model` with the deployed model ID. Once provider quota is available, run the live handbook upload and cited-answer check from the browser.
+
+## Publish the production frontend
+
+Use a separate Neon database for the API project's **Production** environment. Apply the same two schema files there, then set `DATABASE_URL` and `KNOWFLOW_SECURE_COOKIE=1` in Production. Deploy FastAPI with `vercel deploy --prod --skip-domain` and keep its generated deployment URL protected.
+
+Set the Next.js project's Production `KNOWFLOW_API_URL` to that protected API deployment URL. In the API project's Trusted Sources, allow the frontend's **Production** environment to call the API's **Production** environment. Keep the existing Preview rule separate. Deploy the frontend to Production and assign the frontend's project domain. Vercel Hobby's Standard Protection leaves the frontend's production domain public, while KnowFlow still requires a session for workspace access.
+
+Run `python -m evaluation.verify_preview https://your-public-frontend.vercel.app` with the production database URL available to the test process. The test removes its temporary accounts and seeded records. A production model key is needed separately for live PDF indexing and generated answers.

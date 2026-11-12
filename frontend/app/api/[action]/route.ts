@@ -1,4 +1,6 @@
-const postActions = new Set(["documents", "ask", "login", "logout", "signup"]);
+import { getVercelOidcToken } from "@vercel/oidc";
+
+const postActions = new Set(["documents", "search", "ask", "login", "logout", "signup"]);
 
 type Context = { params: Promise<{ action: string }> };
 
@@ -9,18 +11,33 @@ async function relay(request: Request, action: string) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-
   const options: RequestInit & { duplex: "half" } = {
     method: request.method,
     headers,
     body: request.body,
     duplex: "half",
     cache: "no-store",
+    redirect: "error",
     signal: AbortSignal.timeout(120_000),
   };
 
   try {
-    const upstream = await fetch(new URL(action, baseUrl.replace(/\/?$/, "/")), options);
+    const url = new URL(action, baseUrl.replace(/\/?$/, "/"));
+    const environment = process.env.VERCEL_ENV;
+    if (
+      (environment === "preview" || environment === "production")
+      && url.protocol === "https:"
+      && url.hostname.endsWith(".vercel.app")
+    ) {
+      headers.set("x-vercel-trusted-oidc-idp-token", await getVercelOidcToken());
+    }
+    const upstream = await fetch(url, options);
+    if ([401, 403].includes(upstream.status) && !upstream.headers.get("content-type")?.includes("application/json")) {
+      return Response.json(
+        { detail: "Vercel deployment protection blocked the API request." },
+        { status: 502 },
+      );
+    }
     const responseHeaders = new Headers({ "cache-control": "no-store" });
     const contentType = upstream.headers.get("content-type");
     if (contentType) responseHeaders.set("content-type", contentType);
