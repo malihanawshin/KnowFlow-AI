@@ -1,6 +1,6 @@
 # KnowFlow AI
 
-A local FastAPI backend for uploading text-based PDFs, searching passages with pgvector, and answering questions with page-level citations.
+A Next.js workspace and FastAPI backend for uploading text-based PDFs, searching passages with pgvector, and answering questions with page-level citations.
 
 ## Run locally
 
@@ -27,7 +27,20 @@ If you already created the database with the original fixed-dimension schema, ap
 docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/migrate_embedding_models.sql
 ```
 
-## Try the handbook
+## Open the browser workspace
+
+With the backend running, start the frontend from the project root in a second terminal. Use Node.js 20.9 or newer.
+
+```bash
+npm ci --prefix frontend
+npm run dev --prefix frontend
+```
+
+Open [localhost:3000](http://localhost:3000). Choose `fixtures/employee-handbook.pdf`, select **Upload PDF**, then ask the suggested parental leave question. The answer should cite page 2 and show the supporting passage. The equipment allowance question should return insufficient evidence.
+
+The frontend proxies uploads and questions to FastAPI at `http://127.0.0.1:8000`. If the backend uses a different address, set `KNOWFLOW_API_URL` when starting the frontend. Keep model credentials in `backend/.env`.
+
+## Try the handbook through the API
 
 Use the interactive API docs at [localhost:8000/docs](http://127.0.0.1:8000/docs) or run:
 
