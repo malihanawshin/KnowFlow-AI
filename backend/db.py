@@ -5,12 +5,45 @@ import os
 import psycopg
 from psycopg.rows import dict_row
 
+
 def connect():
     url = os.getenv(
         "DATABASE_URL",
         "postgresql://knowflow:knowflow@127.0.0.1:5433/knowflow",
     )
     return psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
+
+
+def list_documents(workspace_id: str, embedding_model: str):
+    with connect() as connection:
+        return connection.execute(
+            """
+            SELECT id, title, searchable
+            FROM (
+                SELECT DISTINCT ON (sha256) id, title, embedding_model = %s AS searchable
+                FROM documents
+                WHERE workspace_id = %s
+                ORDER BY sha256, searchable DESC, id DESC
+            ) AS library
+            ORDER BY id DESC
+            """,
+            (embedding_model, workspace_id),
+        ).fetchall()
+
+
+def delete_document(workspace_id: str, document_id: int) -> bool:
+    with connect() as connection:
+        deleted = connection.execute(
+            """
+            DELETE FROM documents AS candidate
+            USING documents AS selected
+            WHERE selected.workspace_id = %s AND selected.id = %s
+              AND candidate.workspace_id = selected.workspace_id
+              AND candidate.sha256 = selected.sha256
+            """,
+            (workspace_id, document_id),
+        )
+        return deleted.rowcount > 0
 
 
 def has_documents(workspace_id: str, embedding_model: str) -> bool:

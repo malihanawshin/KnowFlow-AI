@@ -39,8 +39,10 @@ async function relay(request: Request, action: string) {
       );
     }
     const responseHeaders = new Headers({ "cache-control": "no-store" });
-    const contentType = upstream.headers.get("content-type");
-    if (contentType) responseHeaders.set("content-type", contentType);
+    for (const name of ["content-type", "retry-after"]) {
+      const value = upstream.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
     for (const cookie of upstream.headers.getSetCookie()) {
       responseHeaders.append("set-cookie", cookie);
     }
@@ -55,7 +57,7 @@ async function relay(request: Request, action: string) {
 
 export async function GET(request: Request, context: Context) {
   const { action } = await context.params;
-  if (action !== "session") {
+  if (action !== "session" && action !== "documents") {
     return Response.json({ detail: "Unknown endpoint." }, { status: 404 });
   }
   return relay(request, action);
@@ -66,11 +68,27 @@ export async function POST(request: Request, context: Context) {
   if (!postActions.has(action)) {
     return Response.json({ detail: "Unknown endpoint." }, { status: 404 });
   }
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  const expectedOrigin = host ? `${new URL(request.url).protocol}//${host}` : new URL(request.url).origin;
-  if (origin && origin !== expectedOrigin) {
+  if (!isSameOrigin(request)) {
     return Response.json({ detail: "Cross-origin request rejected." }, { status: 403 });
   }
   return relay(request, action);
+}
+
+export async function DELETE(request: Request, context: Context) {
+  const { action } = await context.params;
+  const id = new URL(request.url).searchParams.get("id");
+  if (action !== "documents" || !id || !/^[1-9][0-9]{0,18}$/.test(id)) {
+    return Response.json({ detail: "PDF not found." }, { status: 404 });
+  }
+  if (!isSameOrigin(request)) {
+    return Response.json({ detail: "Cross-origin request rejected." }, { status: 403 });
+  }
+  return relay(request, `documents/${id}`);
+}
+
+function isSameOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  const expectedOrigin = host ? `${new URL(request.url).protocol}//${host}` : new URL(request.url).origin;
+  return request.headers.get("sec-fetch-site") !== "cross-site" && (!origin || origin === expectedOrigin);
 }

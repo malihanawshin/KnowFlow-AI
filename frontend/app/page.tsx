@@ -1,20 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDownRight, ArrowUp, BookOpen, Check, FileText, LoaderCircle,
-  Paperclip, Quote, Upload, X,
+  Paperclip, Quote, Trash2, Upload, X,
 } from "lucide-react";
 
 type Citation = {
   chunk_id: number;
+  document_id: number;
   title: string;
   page_number: number;
   text: string;
 };
 
 type Answer = { answer: string; citations: Citation[] };
-type IndexedFile = { id: number; name: string };
+type IndexedFile = { id: number; title: string; searchable: boolean };
 type Member = { email: string; workspace_id: string };
 type UploadResponse = { document_id: number; created: boolean };
 
@@ -29,9 +30,11 @@ class RequestError extends Error {
   }
 }
 
-async function request<T>(action: string, body?: FormData | string, signal?: AbortSignal): Promise<T> {
+async function request<T>(
+  action: string, body?: FormData | string, signal?: AbortSignal, method = body === undefined ? "GET" : "POST",
+): Promise<T> {
   const response = await fetch(`/api/${action}`, {
-    method: body === undefined ? "GET" : "POST",
+    method,
     headers: typeof body === "string" ? { "Content-Type": "application/json" } : undefined,
     body,
     signal,
@@ -109,10 +112,10 @@ export default function Home() {
     }
   }
 
-  function expireSession() {
+  const expireSession = useCallback(() => {
     setMember(null);
     setError("Your session expired. Sign in again to continue.");
-  }
+  }, []);
 
   return (
     <div className="shell">
@@ -170,6 +173,11 @@ export default function Home() {
 function Workspace({ onExpired }: { onExpired: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [indexed, setIndexed] = useState<IndexedFile[]>([]);
+  const [libraryVersion, setLibraryVersion] = useState(0);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<IndexedFile | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [uploadNotice, setUploadNotice] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -180,6 +188,58 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
   const [asking, setAsking] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const questionInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    request<{ documents: IndexedFile[] }>("documents", undefined, controller.signal)
+      .then(({ documents }) => {
+        if (!controller.signal.aborted) setIndexed(documents);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof RequestError && error.status === 401) onExpired();
+        setLibraryError(error instanceof Error ? error.message : "Could not load indexed PDFs.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLibraryLoading(false);
+      });
+    return () => controller.abort();
+  }, [libraryVersion, onExpired]);
+
+  function refreshLibrary() {
+    setLibraryLoading(true);
+    setLibraryError("");
+    setLibraryVersion((version) => version + 1);
+  }
+
+  async function removeDocument() {
+    if (!deleteTarget || deleting || uploading || asking) return;
+    setDeleting(true);
+    setLibraryError("");
+    setUploadNotice("");
+    try {
+      await request<void>(`documents?id=${deleteTarget.id}`, undefined, undefined, "DELETE");
+      setIndexed((items) => items.filter((item) => item.id !== deleteTarget.id));
+      if (result?.citations.some((citation) => citation.document_id === deleteTarget.id)) {
+        setResult(null);
+        setAsked("");
+      }
+      setDeleteTarget(null);
+      setUploadNotice("PDF deleted.");
+      refreshLibrary();
+    } catch (error) {
+      if (error instanceof RequestError && error.status === 401) onExpired();
+      if (error instanceof RequestError && error.status === 404) {
+        setDeleteTarget(null);
+        refreshLibrary();
+        setUploadNotice("This PDF is no longer in your library.");
+      } else {
+        setLibraryError(error instanceof Error ? error.message : "Could not delete PDF.");
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   function selectFile(candidate: File | null) {
     setUploadNotice("");
@@ -194,7 +254,7 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!file || uploading) return;
+    if (!file || uploading || deleting) return;
     setUploading(true);
     setUploadNotice("");
     setUploadError("");
@@ -202,9 +262,7 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
     body.append("file", file);
     try {
       const data = await request<UploadResponse>("documents", body);
-      setIndexed((items) => items.some((item) => item.id === data.document_id)
-        ? items
-        : [...items, { id: data.document_id, name: file.name }]);
+      refreshLibrary();
       setUploadNotice(data.created ? "PDF indexed." : "This PDF is already indexed.");
       setFile(null);
     } catch (error) {
@@ -218,7 +276,7 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
   async function ask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = question.trim();
-    if (!text || asking) return;
+    if (!text || asking || deleting) return;
     setAsked(text);
     setResult(null);
     setAskError("");
@@ -280,7 +338,7 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
                 <span>or drop it here · up to 4 MB</span>
               </button>
             )}
-            {file && <button className="primary upload-button" disabled={uploading} type="submit">
+            {file && <button className="primary upload-button" disabled={uploading || deleting} type="submit">
               {uploading ? <LoaderCircle className="spinner" size={16} /> : <Upload size={16} />}
               {uploading ? "Indexing PDF…" : "Upload PDF"}
             </button>}
@@ -288,12 +346,38 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
             {uploadError && <p role="alert" className="error">{uploadError}</p>}
           </form>
 
-          {indexed.length > 0 && <div className="indexed">
-            <h3>PDFs added this session</h3>
-            <ul>
-              {indexed.map((item) => <li key={item.id}><FileText size={16} /><span>{item.name}</span><Check size={14} className="indexed-check" /></li>)}
-            </ul>
-          </div>}
+          <div className="indexed">
+            <h3>Indexed PDFs</h3>
+            {libraryLoading && <p className="library-note" role="status">Loading PDFs…</p>}
+            {libraryError && <div className="library-feedback">
+              <p role="alert" className="error">{libraryError}</p>
+              {!deleteTarget && <button type="button" className="secondary" onClick={refreshLibrary}>Retry</button>}
+            </div>}
+            {!libraryLoading && !libraryError && indexed.length === 0 && <p className="library-note">No PDFs indexed yet.</p>}
+            {indexed.length > 0 && <ul>
+              {indexed.map((item) => <li key={item.id}>
+                <FileText size={16} />
+                <span>{item.title}{!item.searchable && <small>Re-upload to search</small>}</span>
+                <button type="button" className="icon-button" aria-label={`Delete ${item.title}`}
+                  disabled={deleting || uploading || asking || libraryLoading}
+                  onClick={() => { setLibraryError(""); setDeleteTarget(item); }}>
+                  <Trash2 size={16} />
+                </button>
+              </li>)}
+            </ul>}
+            {deleteTarget && <div className="delete-confirm" role="group" aria-label="Confirm PDF deletion">
+              <p>Delete <strong>{deleteTarget.title}</strong> and its indexed passages?</p>
+              <div>
+                <button type="button" className="secondary" disabled={deleting} onClick={() => {
+                  setDeleteTarget(null);
+                  setLibraryError("");
+                }}>Cancel</button>
+                <button type="button" className="danger" disabled={deleting || uploading || asking} onClick={removeDocument}>
+                  {deleting ? "Deleting…" : "Delete PDF"}
+                </button>
+              </div>
+            </div>}
+          </div>
         </aside>
 
         <section className="card ask" aria-labelledby="ask-title">
@@ -332,7 +416,7 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
           <form className="question-form" onSubmit={ask}>
             <label htmlFor="question" className="visually-hidden">Question</label>
             <input id="question" ref={questionInput} placeholder="Ask a question about your documents…" value={question} maxLength={2000} onChange={(event) => setQuestion(event.target.value)} />
-            <button className="primary send" type="submit" disabled={!question.trim() || asking} aria-label="Ask question">
+            <button className="primary send" type="submit" disabled={!question.trim() || asking || deleting} aria-label="Ask question">
               {asking ? <LoaderCircle size={19} className="spinner" /> : <ArrowUp size={20} />}
             </button>
           </form>

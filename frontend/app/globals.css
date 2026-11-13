@@ -47,12 +47,20 @@ svg { flex-shrink: 0; }
 .primary:disabled { background: #dbe7dd; color: #456354; }
 .upload-button { width: 100%; min-height: 41px; margin-top: 9px; font-size: 14px; font-weight: 650; }
 .notice, .error { margin-top: 12px; line-height: 1.45; font-size: 13px; overflow-wrap: anywhere; }
-.notice, .indexed-check { color: var(--accent); }
+.notice { color: var(--accent); }
 .error { color: #9c3027; }
 .indexed { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }
 .indexed h3 { font-size: 12px; color: var(--muted); font-weight: 650; }
 ul { list-style: none; margin: 0; padding: 0; }
 .indexed li { margin-top: 11px; font-size: 13px; }
+.indexed li small { display: block; margin-top: 3px; color: var(--muted); }
+.library-note { margin-top: 10px; color: var(--muted); font-size: 13px; }
+.library-feedback .secondary { margin-top: 8px; font-size: 12px; }
+.delete-confirm { margin-top: 14px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; overflow-wrap: anywhere; }
+.delete-confirm > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.danger { padding: 7px 10px; border: 1px solid #9c3027; border-radius: 7px; color: #fff; background: #9c3027; }
+.danger:hover:not(:disabled) { background: #7d261f; }
+.danger:disabled { opacity: .6; }
 .ask { display: flex; flex-direction: column; min-height: 525px; }
 .ask-label { padding: 20px 23px; border-bottom: 1px solid var(--line); }
 .answer-area { flex: 1; display: grid; }

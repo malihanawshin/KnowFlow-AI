@@ -51,7 +51,7 @@ class GeneratedAnswer(BaseModel):
 @app.middleware("http")
 async def protect_browser_requests(request: Request, call_next):
     origin = request.headers.get("origin")
-    if request.method == "POST" and (
+    if request.method in {"POST", "DELETE"} and (
         request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}
         or (origin and origin != str(request.base_url).rstrip("/"))
     ):
@@ -134,6 +134,18 @@ def answer_model() -> str:
     if os.getenv("OPENROUTER_API_KEY"):
         return os.getenv("OPENROUTER_ANSWER_MODEL", "openrouter/free")
     return os.getenv("OPENAI_ANSWER_MODEL", "gpt-4.1-mini")
+
+
+@app.get("/documents")
+def list_documents(member: ActiveMember):
+    return {"documents": db.list_documents(member.workspace_id, embedding_model())}
+
+
+@app.delete("/documents/{document_id}", status_code=204)
+def delete_document(document_id: int, member: ActiveMember):
+    if not 0 < document_id <= 2**63 - 1 or not db.delete_document(member.workspace_id, document_id):
+        raise HTTPException(404, "PDF not found.")
+    return Response(status_code=204)
 
 
 @app.post("/documents", status_code=201)
