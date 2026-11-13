@@ -45,6 +45,10 @@ class Member(BaseModel):
     workspace_id: str
 
 
+class AuthenticatedMember(Member):
+    user_id: int
+
+
 def password_hash(password: str, salt: bytes) -> bytes:
     return hashlib.scrypt(
         password.encode(), salt=salt, n=2**15, r=8, p=3, maxmem=64 * 1024 * 1024,
@@ -69,23 +73,23 @@ def session_hash(token: str) -> bytes:
 SessionCookie = Annotated[str | None, Cookie(alias=COOKIE_NAME, max_length=128)]
 
 
-def current_member(token: SessionCookie = None) -> Member:
+def current_member(token: SessionCookie = None) -> AuthenticatedMember:
     if token:
         with connect() as connection:
             member = connection.execute(
                 """
-                SELECT u.email, u.workspace_id
+                SELECT u.id AS user_id, u.email, u.workspace_id
                 FROM sessions s JOIN users u ON u.id = s.user_id
                 WHERE s.token_hash = %s AND s.expires_at > now()
                 """,
                 (session_hash(token),),
             ).fetchone()
         if member:
-            return Member(**member)
+            return AuthenticatedMember(**member)
     raise HTTPException(401, "Sign in to access your workspace.")
 
 
-ActiveMember = Annotated[Member, Depends(current_member)]
+ActiveMember = Annotated[AuthenticatedMember, Depends(current_member)]
 
 
 def cookie_options() -> dict:
@@ -154,7 +158,7 @@ def login(credentials: Credentials, response: Response, token: SessionCookie = N
 @router.get("/session")
 def session(member: ActiveMember, response: Response) -> Member:
     response.headers["Cache-Control"] = "no-store"
-    return member
+    return Member(email=member.email, workspace_id=member.workspace_id)
 
 
 @router.post("/logout", status_code=204)

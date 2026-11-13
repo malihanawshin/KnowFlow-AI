@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from math import ceil
 from pathlib import Path
 
 import psycopg
@@ -17,13 +18,15 @@ from pydantic import BaseModel, Field, field_validator
 from . import auth, db
 from .auth import ActiveMember
 from .chunk_text import chunk_text
+from .model_usage import reserve_model_calls
 from .parse_pdf import extract_pages
 
 app = FastAPI(title="KnowFlow AI")
 app.include_router(auth.router)
 MAX_PDF_BYTES = 4_000_000
+EMBEDDING_BATCH_SIZE = 64
 EMBEDDING_MODEL = "text-embedding-3-small"
-OPENROUTER_EMBEDDING_MODEL = "liquid/lfm-2.5-embedding-350m:free"
+OPENROUTER_EMBEDDING_MODEL = "nvidia/nemotron-3-embed-1b:free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 INSUFFICIENT_EVIDENCE = "I found insufficient evidence in the uploaded documents."
 
@@ -76,6 +79,24 @@ async def validation_error(request: Request, error: RequestValidationError):
 
 @app.exception_handler(APIError)
 async def provider_error(request: Request, error: APIError):
+    if isinstance(error, APIStatusError) and error.status_code == 429:
+        body = error.body if isinstance(error.body, dict) else {}
+        daily_limit = "free-models-per-day" in str(body.get("message", ""))
+        detail = (
+            "OpenRouter's daily free-model limit has been reached. Try again after the quota resets."
+            if daily_limit else "The model provider is rate limiting requests. Wait a moment and try again."
+        )
+        retry_after = error.response.headers.get("Retry-After")
+        return JSONResponse(
+            status_code=429,
+            content={"detail": detail},
+            headers={"Retry-After": retry_after} if retry_after else None,
+        )
+    if isinstance(error, APIStatusError) and error.status_code == 404:
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "The configured model has no available provider endpoint."},
+        )
     if isinstance(error, APIStatusError) and error.status_code == 402:
         return JSONResponse(
             status_code=402,
@@ -87,10 +108,10 @@ async def provider_error(request: Request, error: APIError):
 def openai_client() -> OpenAI:
     openrouter_key = os.getenv("OPENROUTER_API_KEY")
     if openrouter_key:
-        return OpenAI(api_key=openrouter_key, base_url=OPENROUTER_URL, timeout=30)
+        return OpenAI(api_key=openrouter_key, base_url=OPENROUTER_URL, timeout=30, max_retries=0)
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(503, "Set OPENROUTER_API_KEY or OPENAI_API_KEY.")
-    return OpenAI(timeout=30)
+    return OpenAI(timeout=30, max_retries=0)
 
 
 def embedding_model() -> str:
@@ -101,9 +122,9 @@ def embedding_model() -> str:
 
 def embed(client: OpenAI, model: str, texts: list[str]) -> list[list[float]]:
     vectors = []
-    for start in range(0, len(texts), 64):
+    for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
         result = client.embeddings.create(
-            model=model, input=texts[start:start + 64], encoding_format="float",
+            model=model, input=texts[start:start + EMBEDDING_BATCH_SIZE], encoding_format="float",
         )
         vectors.extend(item.embedding for item in sorted(result.data, key=lambda item: item.index))
     return vectors
@@ -137,6 +158,7 @@ def upload_document(file: UploadFile, response: Response, member: ActiveMember):
         return {"document_id": existing["id"], "created": False}
 
     with openai_client() as client:
+        reserve_model_calls(member.user_id, ceil(len(passages) / EMBEDDING_BATCH_SIZE))
         embeddings = embed(client, model, [text for _, text in passages])
     title = Path(file.filename or "document.pdf").name
     document_id, created = db.save_document(member.workspace_id, title, digest, model, passages, embeddings)
@@ -151,6 +173,7 @@ def search(query: Query, member: ActiveMember):
     if not db.has_documents(member.workspace_id, model):
         return {"passages": []}
     with openai_client() as client:
+        reserve_model_calls(member.user_id, 1)
         embedding = embed(client, model, [query.question])[0]
     return {"passages": db.search(member.workspace_id, embedding, model, query.limit)}
 
@@ -161,6 +184,7 @@ def ask(query: Query, member: ActiveMember):
     if not db.has_documents(member.workspace_id, model):
         return {"answer": INSUFFICIENT_EVIDENCE, "citations": []}
     with openai_client() as client:
+        reserve_model_calls(member.user_id, 2)
         embedding = embed(client, model, [query.question])[0]
         passages = db.search(member.workspace_id, embedding, model, query.limit)
         if not passages:

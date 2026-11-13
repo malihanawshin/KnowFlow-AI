@@ -19,7 +19,7 @@ Add `OPENROUTER_API_KEY` to the ignored `backend/.env` file, then start the API:
 uvicorn backend.main:app --reload --env-file backend/.env
 ```
 
-The database defaults to port 5433. Set `DATABASE_URL` to use a different database and apply `backend/schema.sql` there. Compose applies the schema when it creates the database volume. OpenRouter defaults to the free `liquid/lfm-2.5-embedding-350m:free` embedding model and `openrouter/free` for answers. Set `OPENROUTER_EMBEDDING_MODEL` or `OPENROUTER_ANSWER_MODEL` to override them. The answer model must support Chat Completions JSON mode. Re-upload documents after changing embedding models so search uses the matching vectors. To use OpenAI directly, set `OPENAI_API_KEY` and optionally `OPENAI_ANSWER_MODEL`. OpenRouter takes precedence when both keys are set.
+The database defaults to port 5433. Set `DATABASE_URL` to use a different database and apply `backend/schema.sql` there. Compose applies the schema when it creates the database volume. OpenRouter defaults to the free `nvidia/nemotron-3-embed-1b:free` embedding model and `openrouter/free` for answers. Set `OPENROUTER_EMBEDDING_MODEL` or `OPENROUTER_ANSWER_MODEL` to override them. The answer model must support Chat Completions JSON mode. Re-upload documents after changing embedding models so search uses the matching vectors. To use OpenAI directly, set `OPENAI_API_KEY` and optionally `OPENAI_ANSWER_MODEL`. OpenRouter takes precedence when both keys are set.
 
 If you already created the database with the original fixed-dimension schema, apply the migration before starting the API:
 
@@ -103,4 +103,8 @@ Use a separate Neon database for the API project's **Production** environment. A
 
 Set the Next.js project's Production `KNOWFLOW_API_URL` to that protected API deployment URL. In the API project's Trusted Sources, allow the frontend's **Production** environment to call the API's **Production** environment. Keep the existing Preview rule separate. Deploy the frontend to Production and assign the frontend's project domain. Vercel Hobby's Standard Protection leaves the frontend's production domain public, while KnowFlow still requires a session for workspace access.
 
-Run `python -m evaluation.verify_preview https://your-public-frontend.vercel.app` with the production database URL available to the test process. The test removes its temporary accounts and seeded records. A production model key is needed separately for live PDF indexing and generated answers.
+Run `python -m evaluation.verify_preview https://your-public-frontend.vercel.app` with the production database URL available to the test process. The test removes its temporary accounts and seeded records.
+
+Set `OPENROUTER_API_KEY` as a server-only secret in the FastAPI project's **Production** environment to enable live indexing and answers. Apply the latest `backend/schema_auth.sql` before enabling the key so the database can enforce the per-account allowance. Existing local databases also need that schema update.
+
+Each account can reserve 15 model calls per UTC day. A search uses one call, an answer reserves two, and indexing uses one per batch of up to 64 passages. Duplicate uploads and queries in empty workspaces are free of model calls. Reservations are counted even if the provider fails, and the limit resets at midnight UTC. OpenRouter's shared account quota still applies.

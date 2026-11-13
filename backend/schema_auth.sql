@@ -15,3 +15,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at timestamptz NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS daily_model_usage (
+    user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    usage_day date NOT NULL,
+    calls integer NOT NULL CHECK (calls > 0),
+    PRIMARY KEY (user_id, usage_day)
+);
