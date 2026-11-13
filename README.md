@@ -72,6 +72,10 @@ Upload sends extracted text to your configured model provider for embeddings. As
 
 ## Evaluate retrieval and answers
 
+Use **Search** in the workspace to inspect passages and page numbers. Search and Ask combine pgvector and PostgreSQL full-text rankings. Search falls back to keyword results when semantic search is unavailable. Both use the current embedding model's indexed PDFs in the signed-in workspace.
+
+For an existing database, add the full-text index by reapplying `backend/schema.sql`. Existing passages can be searched without re-uploading.
+
 With FastAPI running and the backend environment activated, run:
 
 ```bash

@@ -77,7 +77,7 @@ def main() -> None:
             query = {"question": "How much paid parental leave is available?", "workspace_id": a}
             search = visitor.post("/search", json=query)
             search.raise_for_status()
-            assert search.json() == {"passages": []}
+            assert search.json()["passages"] == []
             answer = visitor.post("/ask", json=query)
             answer.raise_for_status()
             assert answer.json() == {"answer": INSUFFICIENT_EVIDENCE, "citations": []}

@@ -63,6 +63,9 @@ ul { list-style: none; margin: 0; padding: 0; }
 .danger:disabled { opacity: .6; }
 .ask { display: flex; flex-direction: column; min-height: 525px; }
 .ask-label { padding: 20px 23px; border-bottom: 1px solid var(--line); }
+.view-switch { margin-left: auto; display: flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: 8px; }
+.view-switch button { padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 650; }
+.view-switch button[aria-pressed="true"] { color: var(--accent); background: var(--accent-light); }
 .answer-area { flex: 1; display: grid; }
 .empty { align-self: center; justify-self: center; text-align: center; padding: 38px 18px; }
 .empty-icon { width: 61px; height: 61px; margin: 0 auto 17px; border-radius: 17px; }

@@ -183,11 +183,22 @@ def upload_document(file: UploadFile, response: Response, member: ActiveMember):
 def search(query: Query, member: ActiveMember):
     model = embedding_model()
     if not db.has_documents(member.workspace_id, model):
-        return {"passages": []}
-    with openai_client() as client:
-        reserve_model_calls(member.user_id, 1)
-        embedding = embed(client, model, [query.question])[0]
-    return {"passages": db.search(member.workspace_id, embedding, model, query.limit)}
+        return {"passages": [], "mode": "hybrid"}
+    try:
+        with openai_client() as client:
+            reserve_model_calls(member.user_id, 1)
+            embedding = embed(client, model, [query.question])[0]
+    except (APIError, HTTPException) as error:
+        if isinstance(error, HTTPException) and error.status_code not in {429, 503}:
+            raise
+        return {
+            "passages": db.keyword_search(member.workspace_id, query.question, model, query.limit),
+            "mode": "keyword",
+        }
+    return {
+        "passages": db.hybrid_search(member.workspace_id, query.question, embedding, model, query.limit),
+        "mode": "hybrid",
+    }
 
 
 @app.post("/ask")
@@ -198,7 +209,7 @@ def ask(query: Query, member: ActiveMember):
     with openai_client() as client:
         reserve_model_calls(member.user_id, 2)
         embedding = embed(client, model, [query.question])[0]
-        passages = db.search(member.workspace_id, embedding, model, query.limit)
+        passages = db.hybrid_search(member.workspace_id, query.question, embedding, model, query.limit)
         if not passages:
             return {"answer": INSUFFICIENT_EVIDENCE, "citations": []}
         completion = client.chat.completions.create(

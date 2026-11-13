@@ -18,3 +18,6 @@ CREATE TABLE IF NOT EXISTS chunks (
 
 CREATE UNIQUE INDEX IF NOT EXISTS documents_workspace_hash_model_idx
     ON documents (workspace_id, sha256, embedding_model);
+
+CREATE INDEX IF NOT EXISTS chunks_text_search_idx
+    ON chunks USING gin (to_tsvector('simple', text));

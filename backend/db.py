@@ -113,3 +113,36 @@ def search(workspace_id: str, embedding: list[float], embedding_model: str, limi
             """,
             (str(embedding), workspace_id, embedding_model, limit),
         ).fetchall()
+
+
+def keyword_search(workspace_id: str, question: str, embedding_model: str, limit: int):
+    with connect() as connection:
+        return connection.execute(
+            """
+            SELECT c.id AS chunk_id, d.id AS document_id, d.title, c.page_number, c.text,
+                   NULL::double precision AS distance
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            CROSS JOIN websearch_to_tsquery('simple', %s) AS query(terms)
+            WHERE d.workspace_id = %s AND d.embedding_model = %s
+              AND to_tsvector('simple', c.text) @@ query.terms
+            ORDER BY ts_rank_cd(to_tsvector('simple', c.text), query.terms) DESC, c.id
+            LIMIT %s
+            """,
+            (question, workspace_id, embedding_model, limit),
+        ).fetchall()
+
+
+def hybrid_search(workspace_id: str, question: str, embedding: list[float], embedding_model: str, limit: int):
+    candidate_limit = max(20, limit * 2)
+    semantic = search(workspace_id, embedding, embedding_model, candidate_limit)
+    keywords = keyword_search(workspace_id, question, embedding_model, candidate_limit)
+    passages = {row["chunk_id"]: row for row in keywords}
+    passages.update((row["chunk_id"], row) for row in semantic)
+    scores: dict[int, float] = {}
+    for ranking in (semantic, keywords):
+        for rank, row in enumerate(ranking, start=1):
+            chunk_id = row["chunk_id"]
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (60 + rank)
+    ranked = sorted(scores, key=lambda chunk_id: (-scores[chunk_id], chunk_id))
+    return [passages[chunk_id] for chunk_id in ranked[:limit]]

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDownRight, ArrowUp, BookOpen, Check, FileText, LoaderCircle,
-  Paperclip, Quote, Trash2, Upload, X,
+  Paperclip, Quote, Search, Trash2, Upload, X,
 } from "lucide-react";
 
 type Citation = {
@@ -15,6 +15,7 @@ type Citation = {
 };
 
 type Answer = { answer: string; citations: Citation[] };
+type SearchResults = { passages: Citation[]; mode: "hybrid" | "keyword" };
 type IndexedFile = { id: number; title: string; searchable: boolean };
 type Member = { email: string; workspace_id: string };
 type UploadResponse = { document_id: number; created: boolean };
@@ -182,8 +183,10 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
   const [uploadError, setUploadError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [question, setQuestion] = useState("");
+  const [view, setView] = useState<"ask" | "search">("ask");
   const [asked, setAsked] = useState("");
   const [result, setResult] = useState<Answer | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
   const [askError, setAskError] = useState("");
   const [asking, setAsking] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -224,6 +227,8 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
         setResult(null);
         setAsked("");
       }
+      setSearchResults(null);
+      if (view === "search") setAsked("");
       setDeleteTarget(null);
       setUploadNotice("PDF deleted.");
       refreshLibrary();
@@ -279,10 +284,16 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
     if (!text || asking || deleting) return;
     setAsked(text);
     setResult(null);
+    setSearchResults(null);
     setAskError("");
     setAsking(true);
     try {
-      setResult(await request<Answer>("ask", JSON.stringify({ question: text })));
+      const body = JSON.stringify({ question: text });
+      if (view === "search") {
+        setSearchResults(await request<SearchResults>("search", body));
+      } else {
+        setResult(await request<Answer>("ask", body));
+      }
     } catch (error) {
       if (error instanceof RequestError && error.status === 401) onExpired();
       setAskError(error instanceof Error ? error.message : "Could not get an answer.");
@@ -290,6 +301,17 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
       setAsking(false);
     }
   }
+
+  function changeView(nextView: "ask" | "search") {
+    if (view === nextView) return;
+    setView(nextView);
+    setAsked("");
+    setResult(null);
+    setSearchResults(null);
+    setAskError("");
+  }
+
+  const sources = searchResults?.passages ?? result?.citations ?? [];
 
   return (
     <main className="workspace">
@@ -381,29 +403,37 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
         </aside>
 
         <section className="card ask" aria-labelledby="ask-title">
-          <div className="section-label ask-label"><Quote size={17} /><h2 id="ask-title">Ask your documents</h2></div>
+          <div className="section-label ask-label">
+            {view === "search" ? <Search size={17} /> : <Quote size={17} />}
+            <h2 id="ask-title">{view === "search" ? "Search sources" : "Ask your documents"}</h2>
+            <div className="view-switch" role="group" aria-label="Document tools">
+              <button type="button" aria-pressed={view === "ask"} disabled={asking || deleting} onClick={() => changeView("ask")}>Ask</button>
+              <button type="button" aria-pressed={view === "search"} disabled={asking || deleting} onClick={() => changeView("search")}>Search</button>
+            </div>
+          </div>
           <div className="answer-area">
             {!asked ? <div className="empty">
               <span className="empty-icon"><BookOpen size={28} strokeWidth={1.65} /></span>
-              <h3>What would you like to know?</h3>
-              <p>Using the sample handbook? Try a question below.</p>
-              <div className="suggestions">
+              <h3>{view === "search" ? "Find a passage" : "What would you like to know?"}</h3>
+              <p>{view === "search" ? "Search by topic, policy name, or reference ID." : "Using the sample handbook? Try a question below."}</p>
+              {view === "ask" && <div className="suggestions">
                 {questions.map((sample) => <button type="button" key={sample} onClick={() => {
                   setQuestion(sample);
                   questionInput.current?.focus();
                 }}><ArrowDownRight size={16} />{sample}</button>)}
-              </div>
+              </div>}
             </div> : <div className="conversation">
               <p className="question-bubble">{asked}</p>
               {asking && <p role="status" className="loading"><LoaderCircle size={18} className="spinner" />Looking for supporting passages…</p>}
               {askError && <p role="alert" className="error">{askError}</p>}
-              <div aria-live="polite">{result && <div className="result">
-                <h3>Answer</h3>
-                <p className="answer-text">{result.answer}</p>
-                {result.citations.length > 0 && <div className="sources">
-                  <h3>Sources</h3>
+              <div aria-live="polite">{(result || searchResults) && <div className="result">
+                {result && <><h3>Answer</h3><p className="answer-text">{result.answer}</p></>}
+                {searchResults?.mode === "keyword" && <p className="library-note">Showing keyword results. Semantic search is unavailable for this request.</p>}
+                {searchResults && sources.length === 0 && <p className="answer-text">No matching passages.</p>}
+                {sources.length > 0 && <div className="sources">
+                  <h3>{view === "search" ? "Matching passages" : "Sources"}</h3>
                   <ul>
-                    {result.citations.map((source) => <li key={source.chunk_id}>
+                    {sources.map((source) => <li key={source.chunk_id}>
                       <div className="source-heading"><FileText size={16} /><strong>{source.title}</strong><span>Page {source.page_number}</span></div>
                       <blockquote>{source.text}</blockquote>
                     </li>)}
@@ -414,10 +444,10 @@ function Workspace({ onExpired }: { onExpired: () => void }) {
           </div>
 
           <form className="question-form" onSubmit={ask}>
-            <label htmlFor="question" className="visually-hidden">Question</label>
-            <input id="question" ref={questionInput} placeholder="Ask a question about your documents…" value={question} maxLength={2000} onChange={(event) => setQuestion(event.target.value)} />
-            <button className="primary send" type="submit" disabled={!question.trim() || asking || deleting} aria-label="Ask question">
-              {asking ? <LoaderCircle size={19} className="spinner" /> : <ArrowUp size={20} />}
+            <label htmlFor="question" className="visually-hidden">{view === "search" ? "Search query" : "Question"}</label>
+            <input id="question" ref={questionInput} placeholder={view === "search" ? "Search your documents…" : "Ask a question about your documents…"} value={question} maxLength={2000} onChange={(event) => setQuestion(event.target.value)} />
+            <button className="primary send" type="submit" disabled={!question.trim() || asking || deleting} aria-label={view === "search" ? "Search documents" : "Ask question"}>
+              {asking ? <LoaderCircle size={19} className="spinner" /> : view === "search" ? <Search size={19} /> : <ArrowUp size={20} />}
             </button>
           </form>
         </section>
