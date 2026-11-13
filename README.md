@@ -1,114 +1,134 @@
 # KnowFlow AI
 
-A Next.js workspace and FastAPI backend for uploading text-based PDFs, searching passages with pgvector, and answering questions with page-level citations.
+KnowFlow AI is a document search and question-answering app. Upload a PDF, search for a policy or reference ID, and ask questions in plain language. Answers cite the filename, page number, and supporting passage so you can check them against the source.
 
-## Run locally
+The project demonstrates a retrieval-augmented generation (RAG) pipeline, from PDF ingestion and hybrid search to cited answers and workspace isolation.
 
-From the project root, with Python 3.11+ and a running Docker daemon:
+**[Try the live demo](https://knowflow-ai-web-preview.vercel.app/)** · **[Download the sample handbook](fixtures/employee-handbook.pdf)**
+
+Create a KnowFlow account, upload the fictional handbook, and ask *How many paid parental leave days do employees receive?* The expected answer is **20 working days**, cited to **page 2**.
+
+## Features
+
+- **PDF ingestion** extracts text by page, splits it into passages, and indexes them for retrieval.
+- **Hybrid search** combines PostgreSQL full-text search with pgvector similarity search. Source Search can fall back to keyword results when semantic search is unavailable.
+- **Cited answers** use retrieved passages as evidence. The API validates citation IDs against those passages and can return an insufficient-evidence response.
+- **Persistent document library** shows indexed PDFs after refresh or sign-in. Deleting a PDF removes its indexed passages.
+- **Private workspaces** use sign-up, sign-in, and HTTP-only sessions. The API scopes document operations to the signed-in account’s workspace.
+- **Evaluation suite** checks retrieval in the top five results, expected facts, citation evidence, and abstention across five handbook questions.
+
+## Tech stack
+
+| Layer | Technology |
+| --- | --- |
+| Frontend | Next.js, React, TypeScript |
+| Backend | Python, FastAPI, Psycopg |
+| PDF processing | PyMuPDF |
+| Storage and retrieval | PostgreSQL, pgvector, PostgreSQL full-text search with a GIN index |
+| Models | OpenRouter for embeddings and answer generation |
+| Infrastructure | Docker Compose locally, Vercel and Neon in production |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser["Browser"] --> Web["Next.js dashboard and API relay"]
+    Web --> API["FastAPI session checks and workspace scoping"]
+    API --> PDF["PDF extraction and page-aware chunking"]
+    PDF --> Models["OpenRouter embeddings and answer generation"]
+    API --> Retrieval["Hybrid passage retrieval"]
+    Retrieval --> DB["PostgreSQL with pgvector and full-text search"]
+    Retrieval --> Models
+    PDF --> DB
+    API --> DB
+```
+
+1. **Indexing.** FastAPI extracts and chunks text page by page, embeds each passage, and stores the passages and vectors with their document and workspace IDs.
+2. **Retrieval.** FastAPI searches within the signed-in workspace and combines vector and keyword ranks using reciprocal rank fusion. Both ranking paths use passages indexed for the active embedding model.
+3. **Answering.** The model receives the question and retrieved passages. FastAPI resolves validated citation IDs to the original filename, page, and excerpt.
+
+## Screenshot
+
+![KnowFlow AI dashboard showing the indexed employee handbook and a parental leave answer cited to page 2](docs/images/knowflow-dashboard.png)
+
+## What the dashboard includes
+
+| Area | What you can do |
+| --- | --- |
+| **Documents** | Upload a PDF, see which PDFs are indexed, and confirm deletion. PDFs indexed under an older model are marked for re-upload. |
+| **Search** | Enter a topic, policy name, or reference ID and inspect matching excerpts with page numbers. |
+| **Ask** | Ask a question and read the answer alongside its source passages. |
+| **Account** | Create a private workspace, sign in, and sign out. |
+
+## Start locally
+
+Install **Python 3.11+**, **Node.js 20.9+**, and **Docker with Compose**. Use an OpenRouter API key for indexing and generated answers.
+
+Clone the repository and start PostgreSQL:
+
+```bash
+git clone https://github.com/malihanawshin/KnowFlow-AI.git
+cd KnowFlow-AI
+docker compose up -d --wait db
+```
+
+Create an ignored file named `backend/.env` and set your key:
+
+```dotenv
+OPENROUTER_API_KEY=your_key_here
+```
+
+Start FastAPI from the repository root:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r backend/requirements.txt
-docker compose up -d --wait db
-```
-
-Add `OPENROUTER_API_KEY` to the ignored `backend/.env` file, then start the API:
-
-```bash
 uvicorn backend.main:app --reload --env-file backend/.env
 ```
 
-The database defaults to port 5433. Set `DATABASE_URL` to use a different database and apply `backend/schema.sql` there. Compose applies the schema when it creates the database volume. OpenRouter defaults to the free `nvidia/nemotron-3-embed-1b:free` embedding model and `openrouter/free` for answers. Set `OPENROUTER_EMBEDDING_MODEL` or `OPENROUTER_ANSWER_MODEL` to override them. The answer model must support Chat Completions JSON mode. Re-upload documents after changing embedding models so search uses the matching vectors. To use OpenAI directly, set `OPENAI_API_KEY` and optionally `OPENAI_ANSWER_MODEL`. OpenRouter takes precedence when both keys are set.
-
-If you already created the database with the original fixed-dimension schema, apply the migration before starting the API:
-
-```bash
-docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/migrate_embedding_models.sql
-```
-
-## Create an account
-
-On an existing database volume, apply the additive sign-in schema once before using the updated API. Fresh volumes apply it automatically.
-
-```bash
-docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/schema_auth.sql
-```
-
-Choose **Sign up** in the browser workspace to create an account. KnowFlow creates a private workspace for it and signs you in.
-
-For existing documents uploaded before sign-in, an administrator can still provision an account in the original `local` workspace. From the project root, with the backend environment activated:
-
-```bash
-python -m backend.create_user reader@example.test local
-```
-
-The command prompts for a password without echoing it. Each account belongs to one workspace. A new browser sign-up starts with an empty workspace.
-
-Sign-in uses an eight-hour, revocable HTTP-only cookie. For HTTPS, set `KNOWFLOW_SECURE_COOKIE=1` in `backend/.env`.
-
-## Open the browser workspace
-
-With the backend running, start the frontend from the project root in a second terminal. Use Node.js 20.9 or newer.
+In a second terminal, start Next.js from the repository root:
 
 ```bash
 npm ci --prefix frontend
 npm run dev --prefix frontend
 ```
 
-Open [localhost:3000](http://localhost:3000) and sign up or sign in. Choose `fixtures/employee-handbook.pdf`, select **Upload PDF**, then ask the suggested parental leave question. The answer should cite page 2 and show the supporting passage.
+Open [localhost:3000](http://localhost:3000) and choose **Sign up**. The [FastAPI docs](http://localhost:8000/docs) are on port 8000, and Compose exposes PostgreSQL on port 5433. If FastAPI runs at a different URL, set `KNOWFLOW_API_URL` when starting Next.js.
 
-The frontend proxies requests to FastAPI at `http://127.0.0.1:8000`. If the backend uses a different address, set `KNOWFLOW_API_URL` when starting the frontend. Keep model credentials in `backend/.env`.
+<details>
+<summary>Existing databases and evaluation</summary>
 
-## Try the handbook through the API
-
-Use the interactive [FastAPI docs](http://localhost:8000/docs). Send your credentials to `POST /login` to establish the session cookie, then call `/documents`, `/search`, or `/ask` in the same browser. To inspect PDF extraction independently:
-
-```bash
-python backend/parse_pdf.py fixtures/employee-handbook.pdf
-```
-
-Upload sends extracted text to your configured model provider for embeddings. Asking a question sends the question and retrieved passages for answer generation. Use the fictional fixture for testing.
-
-## Evaluate retrieval and answers
-
-Use **Search** in the workspace to inspect passages and page numbers. Search and Ask combine pgvector and PostgreSQL full-text rankings. Search falls back to keyword results when semantic search is unavailable. Both use the current embedding model's indexed PDFs in the signed-in workspace.
-
-For an existing database, add the full-text index by reapplying `backend/schema.sql`. Existing passages can be searched without re-uploading.
-
-With FastAPI running and the backend environment activated, run:
+Fresh Compose volumes initialize both schemas automatically. For a database that still has the original fixed-dimension vector schema, run [the embedding migration](backend/migrate_embedding_models.sql) first. Reapply the current schemas to add missing tables and indexes to an existing volume:
 
 ```bash
-python evaluation/run.py --email reader@example.test
+docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/schema.sql
+docker compose exec -T db psql -v ON_ERROR_STOP=1 -U knowflow -d knowflow < backend/schema_auth.sql
 ```
 
-The runner signs in and uploads the fictional handbook if needed, then checks five questions. It reports whether the expected passage appears in the top five search results, whether the answer contains the expected fact, whether a citation contains the expected passage on the correct page, and whether the uncovered equipment allowance question returns insufficient evidence with no citations.
-
-Use a workspace containing only the handbook for a comparable baseline. To also confirm that a second, empty workspace cannot retrieve or cite the handbook, add `--other-email reviewer@example.test`. The runner prompts for each password. It exits with status `1` for failed checks and `2` for API or setup errors. Use `--base-url` if FastAPI runs on another port.
-
-## Deploy a Vercel preview
-
-Create two Vercel projects from this repository. Use the repository root for **FastAPI** and `frontend/` for **Next.js**. The FastAPI project uses Python 3.12 and `backend.main:app`. Use the Preview environment for verification. If Vercel requires the first deployment on a new project to be Production, decide whether to initialize that project or use an existing project with Preview deployments. PDFs are limited to 4 MB to leave room for multipart headers within Vercel's 4.5 MB request limit.
-
-1. Create a dedicated Neon Free preview database and run `backend/schema.sql`, then `backend/schema_auth.sql` in its SQL editor. The first script enables pgvector. Use a fresh database for preview data.
-2. In the FastAPI project's **Preview** environment, set `DATABASE_URL` to the Neon connection string and `KNOWFLOW_SECURE_COOKIE=1`. Keep `OPENROUTER_API_KEY` there too when you are ready to test real indexing and answers. Sign-up and the isolation smoke test do not require it.
-3. Deploy the FastAPI preview, then set `KNOWFLOW_API_URL` to its HTTPS URL in the Next.js project's **Preview** environment and deploy the frontend. In the API project's **Deployment Protection → Trusted Sources**, allow the Next.js project's **Preview** environment to call the API's **Preview** environment. The Next.js relay sends a short-lived Vercel OIDC token on that request.
-4. Open the frontend preview and verify **Sign up**, **Sign out**, and **Sign in**. To check database-backed isolation without spending model quota, run the smoke test below with the preview `DATABASE_URL` already in your shell. For a protected preview, run with a short-lived `VERCEL_OIDC_TOKEN` issued to the same project by the authenticated Vercel CLI. Use `--direct-api` when testing the FastAPI deployment directly.
+To run the [handbook evaluation](evaluation/handbook_cases.json), use a signed-in test account with a dedicated workspace:
 
 ```bash
-python -m evaluation.verify_preview https://your-frontend-preview.vercel.app
+.venv/bin/python evaluation/run.py --email reader@example.test
 ```
 
-The smoke test creates two temporary accounts, seeds one fictional handbook passage with a synthetic vector, and checks that only the owner can look up that PDF. It checks that the second workspace sees no search results or citations, even with the first workspace's ID in its request, and removes its temporary records. If a model key is already configured in the preview, pass `--embedding-model` with the deployed model ID. Once provider quota is available, run the live handbook upload and cited-answer check from the browser.
+The runner prompts for the account password and uploads the handbook if needed. Add `--other-email reviewer@example.test` with an account in a separate, empty workspace to check isolation.
 
-## Publish the production frontend
+</details>
 
-Use a separate Neon database for the API project's **Production** environment. Apply the same two schema files there, then set `DATABASE_URL` and `KNOWFLOW_SECURE_COOKIE=1` in Production. Deploy FastAPI with `vercel deploy --prod --skip-domain` and keep its generated deployment URL protected.
+## Deployment
 
-Set the Next.js project's Production `KNOWFLOW_API_URL` to that protected API deployment URL. In the API project's Trusted Sources, allow the frontend's **Production** environment to call the API's **Production** environment. Keep the existing Preview rule separate. Deploy the frontend to Production and assign the frontend's project domain. Vercel Hobby's Standard Protection leaves the frontend's production domain public, while KnowFlow still requires a session for workspace access.
+The public frontend runs on Vercel and uses a protected FastAPI deployment. The Next.js server relays requests to FastAPI using short-lived Vercel OIDC tokens. Visitors use KnowFlow sign-in on the public domain. Preview and production use separate Neon databases and separate Vercel Trusted Sources rules.
 
-Run `python -m evaluation.verify_preview https://your-public-frontend.vercel.app` with the production database URL available to the test process. The test removes its temporary accounts and seeded records.
+## Upcoming features
 
-Set `OPENROUTER_API_KEY` as a server-only secret in the FastAPI project's **Production** environment to enable live indexing and answers. Apply the latest `backend/schema_auth.sql` before enabling the key so the database can enforce the per-account allowance. Existing local databases also need that schema update.
+- **Multi-document research** to produce a cited brief across a workspace’s PDFs.
+- **Team collaboration** with workspace invitations and roles.
+- **Larger retrieval benchmark** with similar policies and exact reference IDs to compare hybrid search against vector-only search.
 
-Each account can reserve 15 model calls per UTC day. A search uses one call, an answer reserves two, and indexing uses one per batch of up to 64 passages. Duplicate uploads and queries in empty workspaces are free of model calls. Reservations are counted even if the provider fails, and the limit resets at midnight UTC. OpenRouter's shared account quota still applies.
+## Limitations
+
+- Uploads are limited to **4 MB per PDF**. The app supports PDFs with extractable text. Scanned pages require OCR before upload.
+- The app sends extracted text and questions to its configured model provider. Use fictional or non-sensitive documents when trying the demo.
+- Accounts can reserve **15 model calls per UTC day**. OpenRouter’s shared free-model quota and model availability also affect indexing and generated answers.
+- Changing embedding models requires re-uploading affected PDFs to make them searchable again. The existing evaluation covers a small fictional handbook, so citation quality can vary across other documents.
